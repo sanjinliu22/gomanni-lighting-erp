@@ -7,8 +7,20 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const os = require('os');
-const Database = require('better-sqlite3');
 const { v4: uuidv4 } = require('uuid');
+
+// 数据库驱动：优先 better-sqlite3（本机已编译版），
+// 云端/沙箱等无编译环境自动回退到 Node 内置 node:sqlite（Node >= 22.5）
+function loadDriver() {
+  try {
+    return { Database: require('better-sqlite3'), name: 'better-sqlite3' };
+  } catch (e) {
+    const { DatabaseSync } = require('node:sqlite');
+    return { Database: DatabaseSync, name: 'node:sqlite' };
+  }
+}
+const driver = loadDriver();
+const Database = driver.Database;
 
 const app = express();
 const PORT = process.env.PORT || 3458;
@@ -41,8 +53,14 @@ app.use(express.static(path.join(__dirname, '..')));
 // ================================================================
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'lighting.db');
 const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// pragma 兼容：better-sqlite3 有 .pragma()，node:sqlite 用 exec
+if (typeof db.pragma === 'function') {
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+} else {
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA foreign_keys = ON;');
+}
 
 function initDB() {
   db.exec(`
@@ -480,6 +498,7 @@ app.get('/api/server-info', (req, res) => {
 // ================================================================
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`哥曼尼照明 灯具批发零售管理系统 后端服务已启动`);
+  console.log(`数据库驱动: ${driver.name}`);
   console.log(`本机访问: http://localhost:${PORT}`);
   console.log(`局域网访问: http://${getLanIp()}:${PORT}`);
   console.log(`数据库位置: ${DB_PATH}`);
